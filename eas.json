@@ -1,0 +1,47 @@
+{
+  "cli": {
+    "version": ">= 12.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:5000",
+        "EXPO_PUBLIC_APP_NAME": "WimaKit (Dev)"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://wimakit-api.fly.dev",
+        "EXPO_PUBLIC_APP_NAME": "WimaKit"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://wimakit-api.fly.dev",
+        "EXPO_PUBLIC_APP_NAME": "WimaKit"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal"
+      },
+      "ios": {
+        "appleId": "developer@wimakit.sl",
+        "ascAppId": "XXXXXXXXXX",
+        "appleTeamId": "XXXXXXXXXX"
+      }
+    }
+  }
+}
