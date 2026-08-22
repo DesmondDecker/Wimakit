@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WimaKit API – Fly.io Configuration
+# Deploy:  fly launch (first time) or fly deploy
+# Docs:    https://fly.io/docs/reference/configuration/
+# ─────────────────────────────────────────────────────────────────────────────
+
+app      = "wimakit-api"
+primary_region = "mad"     # Madrid — closest Fly region to West Africa
+kill_signal = "SIGTERM"
+kill_timeout = 30
+
+# ─── Build ────────────────────────────────────────────────────────────────────
+[build]
+  dockerfile = "Dockerfile"
+
+# ─── Environment ─────────────────────────────────────────────────────────────
+[env]
+  NODE_ENV       = "production"
+  PORT           = "5000"
+  APP_NAME       = "WimaKit"
+  # Secrets (set with: fly secrets set KEY=value):
+  # MONGODB_URI, JWT_SECRET, JWT_REFRESH_SECRET,
+  # CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+  #
+  # ALSO REQUIRED — APP_URL and FRONTEND_URL:
+  # Unlike render.yaml, Fly apps don't auto-discover each other's public URL,
+  # so these two can't be wired up declaratively here — they must be set as
+  # secrets pointing at wherever the web frontend actually ends up hosted.
+  # If you deploy wimakit's own fly.toml (app = "wimakit-web") for that:
+  #   fly secrets set APP_URL=https://wimakit-web.fly.dev FRONTEND_URL=https://wimakit-web.fly.dev
+  # utils/email.js uses APP_URL to build every emailed link (password reset,
+  # email verification, order tracking, etc.) and falls back to
+  # http://localhost:3000 if it's unset — silently unreachable in
+  # production. FRONTEND_URL is separately required for CORS to allow the
+  # web frontend's origin at all (see server.js). Skipping either one means
+  # deploys succeed and the API responds fine, but password reset/email
+  # links go nowhere and/or the web frontend can't call the API at all.
+
+# ─── HTTP Service ─────────────────────────────────────────────────────────────
+[http_service]
+  internal_port       = 5000
+  force_https         = true
+  auto_stop_machines  = true    # Stops idle machines (save cost)
+  auto_start_machines = true
+  min_machines_running = 1      # Always keep 1 alive in production
+  processes           = ["app"]
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 200
+    soft_limit = 150
+
+# ─── Health Check ─────────────────────────────────────────────────────────────
+[[http_service.checks]]
+  grace_period  = "10s"
+  interval      = "30s"
+  method        = "GET"
+  timeout       = "10s"
+  path          = "/health"
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+[[vm]]
+  cpu_kind  = "shared"
+  cpus      = 1
+  memory_mb = 256    # Upgrade to 512 for production load
+
+# ─── Processes ────────────────────────────────────────────────────────────────
+[processes]
+  app = "node src/server.js"
+
+# ─── Deploy strategy ─────────────────────────────────────────────────────────
+[deploy]
+  strategy         = "rolling"
+  max_unavailable  = 1
+  wait_timeout     = "5m"
+
+# ─── Mounts (persistent storage) ──────────────────────────────────────────────
+# This was commented out. Cloudinary (via `fly secrets set CLOUDINARY_*`) is
+# still the right primary choice — it's a CDN, this is just a single disk on
+# one machine — but leaving this unmounted meant that if Cloudinary secrets
+# were ever missing, uploaded images went to a plain container filesystem
+# that Fly wipes on every deploy and every machine restart/stop
+# (auto_stop_machines is on above). That silent data loss, combined with the
+# APP_URL/API_URL mixup fixed in utils/imageStorage.js, is what produced
+# blank image cards in production. Mounting a volume here makes local-disk
+# storage merely non-CDN instead of actively lossy, as a safety net —
+# it does not replace setting the Cloudinary secrets.
+# First-time setup: fly volumes create wimakit_uploads --size 1 --region mad
+[[mounts]]
+  source      = "wimakit_uploads"
+  destination = "/app/uploads"

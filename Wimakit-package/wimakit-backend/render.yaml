@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WimaKit – Render Deployment Configuration
+# Deploy at: https://dashboard.render.com/
+# Docs:      https://render.com/docs/yaml-spec
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ─── Backend API (Node.js / Express) ───────────────────────────────────────
+  - type: web
+    name: wimakit-api
+    runtime: node
+    region: oregon             # Change to "frankfurt" or "singapore" for closer to SL
+    plan: starter              # Free tier; upgrade to "standard" for production
+    rootDir: wimakit-backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: APP_NAME
+        value: WimaKit
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: wimakit-web
+          envVarKey: RENDER_EXTERNAL_URL
+          # `property: host` (the previous value here) returns the service's
+          # *private-network* hostname — no scheme, not even the public
+          # onrender.com domain — which is useless both for CORS matching
+          # against a browser's Origin header (server.js compares against a
+          # full "https://..." string) and as a link prefix below. Render
+          # auto-populates RENDER_EXTERNAL_URL on every web service with the
+          # actual public URL (e.g. https://wimakit-web.onrender.com) —
+          # referencing that via envVarKey is what actually works.
+      - key: APP_URL
+        fromService:
+          type: web
+          name: wimakit-web
+          envVarKey: RENDER_EXTERNAL_URL
+          # utils/email.js builds every emailed link (password reset, email
+          # verification, order tracking, wallet, disputes...) from APP_URL,
+          # defaulting to http://localhost:3000 if unset. This var was never
+          # wired up at all before, so in production every one of those
+          # links pointed at localhost — reachable by nobody. This is what
+          # made "forgot password" look like a missing feature: the request
+          # screen and the backend logic both worked, the emailed link to
+          # actually finish the reset just went nowhere.
+
+      # ── Database ──
+      - key: MONGODB_URI
+        sync: false            # Set this manually in Render dashboard
+        # OR use a Render Managed MongoDB (see databases section below)
+
+      # ── Auth ──
+      - key: JWT_SECRET
+        generateValue: true    # Render generates a secure random value
+      - key: JWT_EXPIRES_IN
+        value: 30d
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 90d
+
+      # ── Cloudinary ──
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false # Set this manually in Render dashboard
+      - key: CLOUDINARY_API_KEY
+        sync: false # Set this manually in Render dashboard
+      - key: CLOUDINARY_API_SECRET
+        sync: false # Set this manually in Render dashboard
+
+      # ── Rate Limiting ──
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "300"
+
+    # Auto-deploy on push to main
+    autoDeploy: true
+
+  # ─── Expo Web Frontend ──────────────────────────────────────────────────────
+  - type: web
+    name: wimakit-web
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: wimakit            # Expo app root
+    buildCommand: npm install && npx expo export --platform web
+    startCommand: npx serve dist --listen 3000
+    staticPublishPath: ./dist
+
+    envVars:
+      - key: EXPO_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: wimakit-api
+          envVarKey: RENDER_EXTERNAL_URL
+          # Same fix as FRONTEND_URL above: `property: host` gave the API's
+          # private-network hostname, not a URL the browser could actually
+          # reach. utils/api.ts reads this directly as its BASE_URL, so this
+          # one was the most severe of the three — every API call from the
+          # deployed web build would have failed, not just email links.
+      - key: EXPO_PUBLIC_APP_NAME
+        value: WimaKit
+      - key: EXPO_PUBLIC_DEEP_LINK_SCHEME
+        value: wimakit
+
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    autoDeploy: true
+
+# ─── Cron Jobs ──────────────────────────────────────────────────────────────
+# Uncomment to add scheduled tasks
+# - type: cron
+#   name: wimakit-daily-cleanup
+#   runtime: node
+#   schedule: "0 2 * * *"      # Daily at 2am UTC
+#   rootDir: wimakit-backend
+#   buildCommand: npm install
+#   startCommand: node src/utils/cleanup.js
+#   envVars:
+#     - key: MONGODB_URI
+#       sync: false

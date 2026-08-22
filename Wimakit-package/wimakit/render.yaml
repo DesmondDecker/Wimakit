@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WimaKit – Render Deployment Configuration
+# Deploy at: https://dashboard.render.com/
+# Docs:      https://render.com/docs/yaml-spec
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ─── Backend API (Node.js / Express) ───────────────────────────────────────
+  - type: web
+    name: wimakit-api
+    runtime: node
+    region: oregon             # Change to "frankfurt" or "singapore" for closer to SL
+    plan: starter              # Free tier; upgrade to "standard" for production
+    rootDir: wimakit-backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: APP_NAME
+        value: WimaKit
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: wimakit-web
+          property: host
+          # Will be set to https://wimakit-web.onrender.com automatically
+
+      # ── Database ──
+      - key: MONGODB_URI
+        sync: false            # Set this manually in Render dashboard
+        # OR use a Render Managed MongoDB (see databases section below)
+
+      # ── Auth ──
+      - key: JWT_SECRET
+        generateValue: true    # Render generates a secure random value
+      - key: JWT_EXPIRES_IN
+        value: 30d
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 90d
+
+      # ── Cloudinary ──
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # ── Rate Limiting ──
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "100"
+
+    # Auto-deploy on push to main
+    autoDeploy: true
+
+  # ─── Expo Web Frontend ──────────────────────────────────────────────────────
+  - type: web
+    name: wimakit-web
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: wimakit            # Expo app root
+    buildCommand: npm install && npx expo export --platform web
+    startCommand: npx serve dist --listen 3000
+    staticPublishPath: ./dist
+
+    envVars:
+      - key: EXPO_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: wimakit-api
+          property: host
+      - key: EXPO_PUBLIC_APP_NAME
+        value: WimaKit
+      - key: EXPO_PUBLIC_DEEP_LINK_SCHEME
+        value: wimakit
+
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+      - path: /static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    autoDeploy: true
+
+# ─── Cron Jobs ──────────────────────────────────────────────────────────────
+# Uncomment to add scheduled tasks
+# - type: cron
+#   name: wimakit-daily-cleanup
+#   runtime: node
+#   schedule: "0 2 * * *"      # Daily at 2am UTC
+#   rootDir: wimakit-backend
+#   buildCommand: npm install
+#   startCommand: node src/utils/cleanup.js
+#   envVars:
+#     - key: MONGODB_URI
+#       sync: false
